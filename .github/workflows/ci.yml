@@ -19,10 +19,16 @@ jobs:
           sudo apt-get update && sudo apt-get install -y musl-tools
           cargo build --release --locked --target x86_64-unknown-linux-musl
           sh tests/smoke.sh target/x86_64-unknown-linux-musl/release/niruio
-      - name: PipeWire sandbox (null sinks only, WirePlumber 0.4)
+      - name: PipeWire sandbox (null sinks only, the runner's WirePlumber)
         run: |
           sudo apt-get install -y --no-install-recommends pipewire pipewire-bin wireplumber
           sh tests/sandbox.sh target/release/niruio
+      - name: PipeWire sandbox on Debian 12 (WirePlumber 0.4)
+        run: |
+          docker run --rm -v "$PWD":/src:ro debian:bookworm-slim sh -c '
+            apt-get update -qq && apt-get install -y -qq --no-install-recommends pipewire pipewire-bin wireplumber procps >/dev/null &&
+            wireplumber --version | tail -1 &&
+            cd /src && sh tests/sandbox.sh target/x86_64-unknown-linux-musl/release/niruio'
   msrv:
     name: MSRV (Rust 1.85, Debian 13)
     runs-on: ubuntu-latest
