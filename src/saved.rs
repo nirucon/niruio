@@ -215,6 +215,53 @@ pub fn parse_entry(key: &str, value: &str) -> Option<Entry> {
     Some(entry)
 }
 
+/// The fields WirePlumber 0.4 stores one per line (`KEY:mute=true`).
+const FIELDS_04: &[&str] = &[
+    "volume",
+    "mute",
+    "channelVolumes",
+    "channelMap",
+    "target.node",
+    "target.object",
+];
+
+/// All stream entries of a state file: one JSON line per key on WirePlumber
+/// 0.5, one line per field on 0.4 (`Output/Audio:media.role:Movie:mute=true`,
+/// lists as `1.0;1.0;`).
+pub fn parse_stream_file(text: &str) -> Vec<Entry> {
+    let mut out: Vec<Entry> = Vec::new();
+    let mut fields: Vec<(String, Vec<(String, String)>)> = Vec::new();
+    for (k, v) in keyfile(text) {
+        if v.trim_start().starts_with('{') {
+            out.extend(parse_entry(&k, &v));
+            continue;
+        }
+        let split = FIELDS_04.iter().find_map(|f| {
+            k.strip_suffix(f)
+                .and_then(|base| base.strip_suffix(':'))
+                .map(|base| (base.to_string(), f.to_string()))
+        });
+        match split {
+            Some((base, field)) => match fields.iter_mut().find(|(b, _)| *b == base) {
+                Some((_, list)) => list.push((field, v)),
+                None => fields.push((base, vec![(field, v)])),
+            },
+            None => out.extend(parse_entry(&k, &v)),
+        }
+    }
+    for (base, list) in fields {
+        let joined: Vec<String> = list
+            .iter()
+            .map(|(f, v)| {
+                let f = if f.starts_with("target") { "target" } else { f };
+                format!("{f}:{}", v.trim_end_matches(';').replace(';', ","))
+            })
+            .collect();
+        out.extend(parse_entry(&base, &joined.join(";")));
+    }
+    out
+}
+
 pub fn read_dir(dir: &Path) -> State {
     let mut state = State {
         dir: dir.to_path_buf(),
@@ -224,11 +271,7 @@ pub fn read_dir(dir: &Path) -> State {
         let path = dir.join(file);
         if let Ok(text) = std::fs::read_to_string(&path) {
             state.stream_file = Some(path);
-            state.entries.extend(
-                keyfile(&text)
-                    .into_iter()
-                    .filter_map(|(k, v)| parse_entry(&k, &v)),
-            );
+            state.entries.extend(parse_stream_file(&text));
             break;
         }
     }
@@ -315,6 +358,34 @@ Audio/Sink:node.name:auto_null={"volume":1.0, "mute":false, "channelVolumes":[1.
         assert_eq!(e.volumes, vec![0.0, 0.0]);
         assert_eq!(e.positions, vec!["FL", "FR"]);
         assert!(e.silencing());
+    }
+
+    #[test]
+    fn wireplumber_04_lines() {
+        let e = parse_stream_file(
+            "[restore-stream]\n\
+             Audio/Sink:node.name:test:mute=false\n\
+             Output/Audio:media.role:Movie:channelMap=FL;FR;\n\
+             Output/Audio:media.role:Movie:channelVolumes=1.0;1.0;\n\
+             Output/Audio:media.role:Movie:mute=true\n\
+             Output/Audio:media.role:Movie:volume=1.0\n\
+             Output/Audio:application.name:Firefox:target.node=alsa_output.usb\n",
+        );
+        assert_eq!(e.len(), 3);
+        let movie = e
+            .iter()
+            .find(|x| x.key == "Output/Audio:media.role:Movie")
+            .unwrap();
+        assert_eq!(movie.mute, Some(true));
+        assert_eq!(movie.volumes, vec![1.0, 1.0]);
+        assert_eq!(movie.positions, vec!["FL", "FR"]);
+        assert!(movie.silencing());
+        let ff = e.iter().find(|x| x.value == "Firefox").unwrap();
+        assert_eq!(ff.target.as_deref(), Some("alsa_output.usb"));
+        assert_eq!(
+            e.iter().find(|x| x.class == "Audio/Sink").unwrap().mute,
+            Some(false)
+        );
     }
 
     #[test]

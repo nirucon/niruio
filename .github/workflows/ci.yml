@@ -26,7 +26,7 @@ jobs:
       - name: PipeWire sandbox on Debian 12 (WirePlumber 0.4)
         run: |
           docker run --rm -v "$PWD":/src:ro debian:bookworm-slim sh -c '
-            apt-get update -qq && apt-get install -y -qq --no-install-recommends pipewire pipewire-bin wireplumber procps >/dev/null &&
+            apt-get update -qq && apt-get install -y -qq --no-install-recommends pipewire pipewire-bin wireplumber procps dbus-daemon >/dev/null &&
             wireplumber --version | tail -1 &&
             cd /src && sh tests/sandbox.sh target/x86_64-unknown-linux-musl/release/niruio'
   msrv:

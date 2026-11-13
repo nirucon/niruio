@@ -34,6 +34,13 @@ CONF
   export XDG_RUNTIME_DIR="$dir/run" PIPEWIRE_RUNTIME_DIR="$dir/run" XDG_STATE_HOME="$dir/state" \
     XDG_CONFIG_HOME="$dir/config" DBUS_SESSION_BUS_ADDRESS=disabled: PIPEWIRE_LOG_SYSTEMD=false
   unset DISPLAY WAYLAND_DISPLAY PULSE_SERVER
+  # WirePlumber 0.4 needs a session bus: a private one, never the desktop's.
+  if command -v dbus-daemon >/dev/null 2>&1; then
+    setsid dbus-daemon --session --address="unix:path=$dir/run/bus" --nofork > "$dir/dbus.log" 2>&1 < /dev/null &
+    echo $! > "$dir/dbus.pid"
+    i=0; while [ ! -S "$dir/run/bus" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$dir/run/bus"
+  fi
   setsid pipewire > "$dir/pipewire.log" 2>&1 < /dev/null &
   echo $! > "$dir/pipewire.pid"
   i=0; while [ ! -S "$dir/run/pipewire-0" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
@@ -43,7 +50,7 @@ CONF
   sleep 0.5
   ;;
 stop)
-  for p in wireplumber pipewire; do
+  for p in wireplumber pipewire dbus; do
     [ -f "$dir/$p.pid" ] && kill "$(cat "$dir/$p.pid")" 2>/dev/null || :
   done
   sleep 0.3
