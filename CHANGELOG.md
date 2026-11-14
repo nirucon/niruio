@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1
+
+- **Fallback card profiles:** one finding per card instead of one per output
+  and input. A fallback profile whose outputs and inputs all work (many
+  laptops with speaker amplifiers, such as the HP ZBook 8 G1a) is information,
+  not a warning. The doctor never offers Pro Audio or a profile that loses an
+  output or input; it offers only an available profile that keeps every
+  direction, with available ports.
+
 ## 0.1.0
 
 - **First release.** Outputs, inputs and programs with live meters, volume,

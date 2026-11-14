@@ -1,0 +1,314 @@
+[
+ {
+  "id": 0,
+  "type": "PipeWire:Interface:Core",
+  "info": {
+   "version": "1.4.2",
+   "props": {}
+  }
+ },
+ {
+  "id": 33,
+  "type": "PipeWire:Interface:Client",
+  "info": {
+   "props": {
+    "application.name": "WirePlumber"
+   }
+  }
+ },
+ {
+  "id": 40,
+  "type": "PipeWire:Interface:Metadata",
+  "props": {
+   "metadata.name": "default"
+  },
+  "metadata": [
+   {
+    "subject": 0,
+    "key": "default.audio.sink",
+    "value": {
+     "name": "alsa_output.pci-0000_c5_00.6.stereo-fallback"
+    }
+   },
+   {
+    "subject": 0,
+    "key": "default.audio.source",
+    "value": {
+     "name": "alsa_input.pci-0000_c5_00.6.analog-stereo"
+    }
+   }
+  ]
+ },
+ {
+  "id": 50,
+  "type": "PipeWire:Interface:Device",
+  "info": {
+   "props": {
+    "device.name": "alsa_card.pci-0000_c5_00.6",
+    "device.description": "Ryzen HD Audio Controller",
+    "device.api": "alsa",
+    "device.bus": "pci",
+    "media.class": "Audio/Device",
+    "api.alsa.card": 1
+   },
+   "params": {
+    "EnumProfile": [
+     {
+      "index": 0,
+      "name": "off",
+      "description": "Off",
+      "priority": 0,
+      "available": "yes",
+      "classes": [
+       0
+      ]
+     },
+     {
+      "index": 1,
+      "name": "pro-audio",
+      "description": "Pro Audio",
+      "priority": 1,
+      "available": "yes",
+      "classes": [
+       2,
+       [
+        "Audio/Source",
+        2,
+        "card.profile.devices",
+        [
+         0
+        ]
+       ],
+       [
+        "Audio/Sink",
+        4,
+        "card.profile.devices",
+        [
+         1
+        ]
+       ]
+      ]
+     },
+     {
+      "index": 2,
+      "name": "input:analog-stereo",
+      "description": "Analog Stereo Input",
+      "priority": 65,
+      "available": "yes",
+      "classes": [
+       1,
+       [
+        "Audio/Source",
+        1,
+        "card.profile.devices",
+        [
+         0
+        ]
+       ]
+      ]
+     },
+     {
+      "index": 3,
+      "name": "output:stereo-fallback+input:analog-stereo",
+      "description": "Stereo Output + Analog Stereo Input",
+      "priority": 5165,
+      "available": "yes",
+      "classes": [
+       2,
+       [
+        "Audio/Source",
+        1,
+        "card.profile.devices",
+        [
+         0
+        ]
+       ],
+       [
+        "Audio/Sink",
+        1,
+        "card.profile.devices",
+        [
+         1
+        ]
+       ]
+      ]
+     },
+     {
+      "index": 4,
+      "name": "output:stereo-fallback",
+      "description": "Stereo Output",
+      "priority": 5100,
+      "available": "yes",
+      "classes": [
+       1,
+       [
+        "Audio/Sink",
+        1,
+        "card.profile.devices",
+        [
+         1
+        ]
+       ]
+      ]
+     }
+    ],
+    "Profile": [
+     {
+      "index": 3,
+      "name": "output:stereo-fallback+input:analog-stereo",
+      "description": "Stereo Output + Analog Stereo Input",
+      "priority": 5165,
+      "available": "yes",
+      "classes": [
+       2,
+       [
+        "Audio/Source",
+        1,
+        "card.profile.devices",
+        [
+         0
+        ]
+       ],
+       [
+        "Audio/Sink",
+        1,
+        "card.profile.devices",
+        [
+         1
+        ]
+       ]
+      ]
+     }
+    ],
+    "EnumRoute": [
+     {
+      "index": 0,
+      "direction": "Input",
+      "name": "analog-input-mic",
+      "description": "Microphone",
+      "priority": 8700,
+      "available": "yes",
+      "profiles": [
+       2,
+       3
+      ],
+      "devices": [
+       0
+      ]
+     },
+     {
+      "index": 1,
+      "direction": "Output",
+      "name": "[Out] Speaker",
+      "description": "Speaker",
+      "priority": 10000,
+      "available": "unknown",
+      "profiles": [
+       3,
+       4
+      ],
+      "devices": [
+       1
+      ]
+     }
+    ],
+    "Route": [
+     {
+      "index": 1,
+      "direction": "Output",
+      "name": "[Out] Speaker",
+      "description": "Speaker",
+      "available": "unknown",
+      "device": 1,
+      "props": {
+       "mute": false,
+       "channelVolumes": [
+        0.3,
+        0.3
+       ]
+      }
+     },
+     {
+      "index": 0,
+      "direction": "Input",
+      "name": "analog-input-mic",
+      "description": "Microphone",
+      "available": "yes",
+      "device": 0,
+      "props": {
+       "mute": false,
+       "channelVolumes": [
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ]
+   }
+  }
+ },
+ {
+  "id": 60,
+  "type": "PipeWire:Interface:Node",
+  "info": {
+   "state": "idle",
+   "props": {
+    "media.class": "Audio/Sink",
+    "node.name": "alsa_output.pci-0000_c5_00.6.stereo-fallback",
+    "node.description": "Ryzen HD Audio Controller Speaker",
+    "object.serial": 60,
+    "device.id": 50,
+    "card.profile.device": 1,
+    "audio.channels": 2,
+    "audio.position": "FL,FR"
+   },
+   "params": {
+    "Props": [
+     {
+      "mute": false,
+      "channelVolumes": [
+       0.3,
+       0.3
+      ],
+      "channelMap": [
+       "FL",
+       "FR"
+      ]
+     }
+    ]
+   }
+  }
+ },
+ {
+  "id": 61,
+  "type": "PipeWire:Interface:Node",
+  "info": {
+   "state": "idle",
+   "props": {
+    "media.class": "Audio/Source",
+    "node.name": "alsa_input.pci-0000_c5_00.6.analog-stereo",
+    "node.description": "Ryzen HD Audio Controller Microphone",
+    "object.serial": 61,
+    "device.id": 50,
+    "card.profile.device": 0,
+    "audio.channels": 2,
+    "audio.position": "FL,FR"
+   },
+   "params": {
+    "Props": [
+     {
+      "mute": false,
+      "channelVolumes": [
+       0.3,
+       0.3
+      ],
+      "channelMap": [
+       "FL",
+       "FR"
+      ]
+     }
+    ]
+   }
+  }
+ }
+]

@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-VERSION="0.1.0"
+VERSION="0.1.1"
 REPO="${NIRUIO_REPO:-nirucon/niruio}"
 PREFIX="${NIRUIO_PREFIX:-${NIRU_PREFIX:-$HOME/.local}}"
 BIN="$PREFIX/bin"

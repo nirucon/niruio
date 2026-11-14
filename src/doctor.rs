@@ -120,7 +120,7 @@ fn best_profile(device: &crate::pw::Device, want_output: bool) -> Option<&crate:
     device
         .profiles
         .iter()
-        .filter(|p| p.name != "off" && p.available != "no")
+        .filter(|p| p.name != "off" && p.available != "no" && !p.name.starts_with("pro-audio"))
         .filter(|p| {
             if want_output {
                 p.sinks > 0
@@ -184,31 +184,6 @@ fn check_device(
     // Card profile and port.
     if let Some(device) = node.device_id.and_then(|id| model.device(id)) {
         if let Some(profile) = device.active_profile() {
-            if profile.name.contains("fallback") {
-                let mut f = finding(
-                    Severity::Warning,
-                    "cards",
-                    format!("{what}-fallback-profile"),
-                    format!("{} uses a fallback profile", device.description),
-                    format!(
-                        "The card is in \"{}\" ({}): PipeWire could not match its proper \
-                         profile, so ports may be missing or wrong.",
-                        profile.description, profile.name
-                    ),
-                );
-                if let Some(best) = best_profile(device, node.kind == Kind::Sink)
-                    .filter(|b| b.index != profile.index && !b.name.contains("fallback"))
-                {
-                    f = f.with_fix(
-                        Fix::Profile {
-                            device: device.id,
-                            index: best.index,
-                        },
-                        format!("switch {} to \"{}\"", device.description, best.description),
-                    );
-                }
-                out.push(f);
-            }
             if device.bluetooth() && node.kind == Kind::Sink && profile.sources > 0 {
                 let mut f = finding(
                     Severity::Info,
@@ -302,6 +277,89 @@ fn check_device(
                 }
             }
         }
+    }
+}
+
+/// A profile to offer instead of `current`: never Pro Audio (no mixer, no
+/// ports), never another fallback, available, keeping every direction the
+/// current profile has, each with an available port. None when no such
+/// profile exists.
+fn superset_profile<'a>(
+    device: &'a crate::pw::Device,
+    current: &crate::pw::Profile,
+) -> Option<&'a crate::pw::Profile> {
+    let port_ok = |p: &crate::pw::Profile, output: bool| {
+        device
+            .routes
+            .iter()
+            .any(|r| r.output == output && r.profiles.contains(&p.index) && r.available != "no")
+    };
+    device
+        .profiles
+        .iter()
+        .filter(|p| p.index != current.index && p.available != "no")
+        .filter(|p| {
+            p.name != "off" && !p.name.starts_with("pro-audio") && !p.name.contains("fallback")
+        })
+        .filter(|p| p.sinks >= current.sinks && p.sources >= current.sources)
+        .filter(|p| p.sinks + p.sources > 0)
+        .filter(|p| (p.sinks == 0 || port_ok(p, true)) && (p.sources == 0 || port_ok(p, false)))
+        .max_by_key(|p| p.priority)
+}
+
+/// One finding per card in a fallback profile. A fallback whose outputs and
+/// inputs all exist works (many laptops with speaker amplifiers only have
+/// that): information, not a warning, and no fix unless a strictly better
+/// profile exists.
+fn check_fallback_profiles(out: &mut Vec<Finding>, model: &Model) {
+    for device in &model.devices {
+        let Some(profile) = device.active_profile() else {
+            continue;
+        };
+        if !profile.name.contains("fallback") {
+            continue;
+        }
+        let has = |kind: Kind| {
+            model
+                .nodes
+                .iter()
+                .any(|n| n.device_id == Some(device.id) && n.kind == kind)
+        };
+        let working =
+            (profile.sinks == 0 || has(Kind::Sink)) && (profile.sources == 0 || has(Kind::Source));
+        let mut f = finding(
+            if working {
+                Severity::Info
+            } else {
+                Severity::Warning
+            },
+            "cards",
+            format!("fallback-profile-{}", device.id),
+            format!("{} uses a fallback profile", device.description),
+            if working {
+                format!(
+                    "The card is in \"{}\" ({}). Its outputs and inputs work; this is \
+                     normal on some laptops and needs no change.",
+                    profile.description, profile.name
+                )
+            } else {
+                format!(
+                    "The card is in \"{}\" ({}), and not every device of that profile \
+                     appeared.",
+                    profile.description, profile.name
+                )
+            },
+        );
+        if let Some(best) = superset_profile(device, profile) {
+            f = f.with_fix(
+                Fix::Profile {
+                    device: device.id,
+                    index: best.index,
+                },
+                format!("switch {} to \"{}\"", device.description, best.description),
+            );
+        }
+        out.push(f);
     }
 }
 
@@ -554,6 +612,7 @@ pub fn run(input: &Input) -> Vec<Finding> {
             }
         }
     }
+    check_fallback_profiles(&mut out, model);
     check_cameras(&mut out, input);
     if out.iter().all(|f| f.severity >= Severity::Info) {
         let sink = model
@@ -871,5 +930,79 @@ mod tests {
         assert!(f
             .iter()
             .any(|f| f.id == "camera-busy-/dev/video0" && f.detail.contains("zoom (12)")));
+    }
+
+    fn zbook() -> Model {
+        Graph::from_json(include_str!("../tests/fixtures/zbook-fallback.json"))
+            .unwrap()
+            .model()
+    }
+
+    fn run_on(m: &Model) -> Vec<Finding> {
+        let s = State::default();
+        run(&Input {
+            model: Some(m),
+            error: None,
+            saved: &s,
+            cameras: &[],
+            alsa: &no_alsa,
+            camera_dev_present: false,
+        })
+    }
+
+    #[test]
+    fn working_fallback_is_one_info_without_a_fix() {
+        // HP ZBook 8 G1a (ALC245 + CS35L56): sound works in
+        // output:stereo-fallback+input:analog-stereo. Pro Audio and the
+        // input-only profile must never be offered.
+        let f = run_on(&zbook());
+        let fallback: Vec<&Finding> = f
+            .iter()
+            .filter(|f| f.id.starts_with("fallback-profile"))
+            .collect();
+        assert_eq!(fallback.len(), 1, "{f:#?}");
+        assert_eq!(fallback[0].severity, Severity::Info);
+        assert!(fallback[0].fix.is_none(), "{:?}", fallback[0].fix);
+        assert!(f.iter().all(|f| f.severity >= Severity::Info), "{f:#?}");
+        assert!(f
+            .iter()
+            .all(|f| !matches!(f.fix, Some(Fix::Profile { .. }))));
+    }
+
+    #[test]
+    fn broken_fallback_warns_but_never_offers_a_lossy_profile() {
+        let mut m = zbook();
+        m.nodes.retain(|n| n.kind != Kind::Sink);
+        let f = run_on(&m);
+        let fb = f.iter().find(|f| f.id == "fallback-profile-50").unwrap();
+        assert_eq!(fb.severity, Severity::Warning);
+        assert!(fb.fix.is_none(), "{:?}", fb.fix);
+    }
+
+    #[test]
+    fn a_proper_duplex_profile_with_ports_is_offered() {
+        let mut m = zbook();
+        let card = m.devices.iter_mut().find(|d| d.id == 50).unwrap();
+        card.profiles.push(crate::pw::Profile {
+            index: 5,
+            name: "output:analog-stereo+input:analog-stereo".into(),
+            description: "Analog Stereo Duplex".into(),
+            available: "yes".into(),
+            priority: 6565,
+            sinks: 1,
+            sources: 1,
+        });
+        for r in card.routes.iter_mut() {
+            r.profiles.push(5);
+        }
+        let f = run_on(&m);
+        let fb = f.iter().find(|f| f.id == "fallback-profile-50").unwrap();
+        assert_eq!(
+            fb.fix,
+            Some(Fix::Profile {
+                device: 50,
+                index: 5
+            })
+        );
     }
 }
