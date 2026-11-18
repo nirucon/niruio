@@ -1,6 +1,6 @@
 //! `niruio heal`: probe sound cards again when WirePlumber met them before
-//! the hardware was ready. NIRUWM runs `niruio heal --login` once after each
-//! login; it does nothing when every card looks right.
+//! the hardware was ready. NIRUWM runs `niruio heal --login` after each login
+//! (so after every reboot); it does nothing when every card looks right.
 
 use crate::actions;
 use crate::doctor;
@@ -66,31 +66,15 @@ fn log(line: &str) {
     }
 }
 
-/// Once per login: a marker in the runtime dir, which goes away at logout.
-fn first_time_this_login() -> bool {
-    let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") else {
-        return true;
-    };
-    let marker = std::path::Path::new(&dir).join("niruio-heal-login");
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(marker)
-        .is_ok()
-}
-
 pub fn heal(login: bool, force: bool) -> ExitCode {
     let fixture = std::env::var("NIRUIO_PW_DUMP").is_ok();
-    if login && !fixture && !first_time_this_login() {
-        return ExitCode::SUCCESS;
-    }
     let wait = if fixture {
         Duration::ZERO
     } else {
         Duration::from_secs(30)
     };
     let Some(model) = wait_for_cards(wait) else {
-        log("PipeWire showed no sound card within 30 s; nothing to do");
+        log("PipeWire showed no sound card within 60 s; nothing to do");
         return ExitCode::SUCCESS;
     };
     let mut before = split(&model);
@@ -98,7 +82,12 @@ pub fn heal(login: bool, force: bool) -> ExitCode {
         before.push("every card (forced)".into());
     }
     if before.is_empty() {
-        if !login {
+        if login {
+            log(&format!(
+                "login check: {} sound card(s), all with their outputs and inputs",
+                model.devices.iter().filter(|d| d.api == "alsa").count()
+            ));
+        } else {
             println!("Every sound card has its outputs and inputs; nothing to heal.");
         }
         return ExitCode::SUCCESS;
@@ -112,36 +101,57 @@ pub fn heal(login: bool, force: bool) -> ExitCode {
         },
         before.join(", ")
     ));
-    if login && !fixture {
-        // Give slow hardware (speaker amplifier firmware) a moment more.
-        std::thread::sleep(Duration::from_secs(3));
-    }
-    if let Err(e) = actions::restart_wireplumber() {
-        log(&format!("could not restart WirePlumber: {e}"));
-        return ExitCode::FAILURE;
-    }
     if fixture {
+        if let Err(e) = actions::restart_wireplumber() {
+            log(&format!("could not restart WirePlumber: {e}"));
+            return ExitCode::FAILURE;
+        }
         println!("restarted WirePlumber for {}", before.join(", "));
         return ExitCode::SUCCESS;
     }
-    std::thread::sleep(Duration::from_secs(2));
-    let after = wait_for_cards(Duration::from_secs(15))
-        .map(|m| split(&m))
-        .unwrap_or_default();
-    if after.is_empty() {
-        log("WirePlumber restarted; every card has its outputs and inputs again");
-        if !login {
-            println!("Healed: {}", before.join(", "));
+    // Slow hardware (speaker amplifiers loading firmware, device permissions
+    // that arrive with the login) can need more than one try: wait a little
+    // longer before each of at most three restarts.
+    let waits: &[u64] = if login { &[3, 6, 10] } else { &[0, 3, 6] };
+    let mut still = before.clone();
+    for (attempt, wait) in waits.iter().enumerate() {
+        std::thread::sleep(Duration::from_secs(*wait));
+        if let Err(e) = actions::restart_wireplumber() {
+            log(&format!("could not restart WirePlumber: {e}"));
+            return ExitCode::FAILURE;
         }
-        ExitCode::SUCCESS
-    } else {
+        std::thread::sleep(Duration::from_secs(2));
+        still = match wait_for_cards(Duration::from_secs(15)) {
+            Some(model) => split(&model),
+            None => vec!["no sound card after the restart".into()],
+        };
+        if still.is_empty() {
+            log(&format!(
+                "WirePlumber restarted (try {}); every card has its outputs and inputs again",
+                attempt + 1
+            ));
+            if !login {
+                println!("Healed: {}", before.join(", "));
+            }
+            return ExitCode::SUCCESS;
+        }
         log(&format!(
-            "still missing after one restart: {}",
-            after.join(", ")
+            "try {}: still missing: {}",
+            attempt + 1,
+            still.join(", ")
         ));
-        if !login {
-            println!("Still missing after one restart: {}", after.join(", "));
-        }
-        ExitCode::FAILURE
     }
+    log(&format!(
+        "gave up after {} restarts: {}; see niruio doctor",
+        waits.len(),
+        still.join(", ")
+    ));
+    if !login {
+        println!(
+            "Still missing after {} restarts: {}",
+            waits.len(),
+            still.join(", ")
+        );
+    }
+    ExitCode::FAILURE
 }
