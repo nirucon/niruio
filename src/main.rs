@@ -6,6 +6,7 @@ mod alsa;
 mod app;
 mod camera;
 mod doctor;
+mod heal;
 mod meter;
 mod mictest;
 mod monitor;
@@ -32,6 +33,10 @@ Usage:
                                --fix applies every fix for problems and warnings
   niruio saved [--json]        what WirePlumber remembers per role and program
   niruio reset KEY|--silencing reset remembered entries to 100 % unmuted
+  niruio heal [--login|--force] probe sound cards again if one lost its
+                               microphone or output at start (runs once
+                               after each login in NIRUWM); --force
+                               probes again even when all looks right
   niruio --version | --help
 
 Keys: Tab/1-7 switch tabs, arrows or hjkl select and change, m mute,
@@ -53,6 +58,7 @@ fn main() -> ExitCode {
         Some("doctor") => status::doctor(flag("--json"), flag("--fix"), flag("--brief")),
         Some("saved") => status::saved(flag("--json")),
         Some("reset") => status::reset(args.get(1).map(String::as_str)),
+        Some("heal") => heal::heal(flag("--login"), flag("--force")),
         Some("--window") => window(args.get(1).map(String::as_str)),
         other => {
             let other = if other == Some("--tab") {

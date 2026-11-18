@@ -52,6 +52,12 @@ screen of its doctor, together with the fix.
 - A command line for scripts, `nirux doctor` and the launcher:
   `niruio status`, `niruio doctor`, `niruio saved`, `niruio reset`, all with
   `--json` where it makes sense.
+- Self-healing after login: some laptops load speaker amplifier firmware while
+  the sound service starts, and the card then comes up without its microphone
+  (or without its output). NIRUWM runs `niruio heal --login` once after each
+  login; it probes such a card again by restarting only WirePlumber, and does
+  nothing when every card looks right. What it did is in
+  `~/.local/state/niruio/heal.log`.
 - Colours follow the active NIRUX theme, including your own themes.
 - Starts in milliseconds; meters run only for the tab you look at and stop
   when you leave it.
@@ -103,9 +109,11 @@ niruio doctor --fix       # apply every fix for problems and warnings
 niruio saved              # what WirePlumber remembers
 niruio reset --silencing  # reset every remembered entry that mutes or silences
 niruio reset 'Output/Audio:media.role:Movie'
+niruio heal               # probe a card again that lost its microphone or output
+niruio heal --force       # probe every card again (restarts WirePlumber)
 ```
 
-`status`, `doctor`, `saved` and `reset` are commands; `--tab saved` and
+`status`, `doctor`, `saved`, `reset` and `heal` are commands; `--tab saved` and
 `--tab doctor` open those tabs in the interface.
 
 ### Keys

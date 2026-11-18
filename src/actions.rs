@@ -220,7 +220,104 @@ pub fn restart_audio() -> Result<(), String> {
         ])
         .map(drop);
     }
-    Err("PipeWire is started by the session here; log out and in again".into())
+    // The session started PipeWire (Void): WirePlumber is enough to probe
+    // the cards again, and PipeWire itself keeps running.
+    restart_wireplumber()
+}
+
+/// File where NIRUIO notes a WirePlumber it started itself, so the session
+/// stops it at logout like its own.
+pub fn wireplumber_pid_file() -> Option<std::path::PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(|d| std::path::Path::new(&d).join("niruio-wireplumber.pid"))
+}
+
+/// WirePlumber processes of this user in this session (same runtime dir).
+fn session_wireplumbers() -> Vec<u32> {
+    let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
+    let uid = current_uid();
+    let mut out = Vec::new();
+    let Ok(dir) = std::fs::read_dir("/proc") else {
+        return out;
+    };
+    for entry in dir.flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let base = entry.path();
+        let comm = std::fs::read_to_string(base.join("comm")).unwrap_or_default();
+        if comm.trim() != "wireplumber" {
+            continue;
+        }
+        let owner = std::fs::read_to_string(base.join("status"))
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("Uid:"))
+                    .and_then(|l| l.split_whitespace().nth(1).map(str::to_owned))
+            })
+            .unwrap_or_default();
+        if owner != uid {
+            continue;
+        }
+        let env = std::fs::read(base.join("environ")).unwrap_or_default();
+        let same = env
+            .split(|b| *b == 0)
+            .any(|kv| kv == format!("XDG_RUNTIME_DIR={runtime}").as_bytes());
+        if same {
+            out.push(pid);
+        }
+    }
+    out
+}
+
+/// The real user id, read from /proc so no libc call is needed.
+fn current_uid() -> String {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("Uid:"))
+                .and_then(|l| l.split_whitespace().nth(1).map(str::to_owned))
+        })
+        .unwrap_or_default()
+}
+
+/// Restart only WirePlumber, which makes it probe every sound card again.
+/// PipeWire and the programs playing sound keep running; streams move back
+/// to their devices within a second.
+pub fn restart_wireplumber() -> Result<(), String> {
+    if have("systemctl") && run(&["systemctl", "--user", "cat", "wireplumber.service"]).is_ok() {
+        return run(&["systemctl", "--user", "restart", "wireplumber"]).map(drop);
+    }
+    if dry_run().is_some() {
+        return run(&["kill", "wireplumber"])
+            .and_then(|_| run(&["wireplumber"]))
+            .map(drop);
+    }
+    let old = session_wireplumbers();
+    if old.is_empty() {
+        return Err("WirePlumber is not running in this session".into());
+    }
+    for pid in &old {
+        let _ = Command::new("kill").arg(pid.to_string()).status();
+    }
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(3) && !session_wireplumbers().is_empty() {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    use std::os::unix::process::CommandExt;
+    let child = Command::new("wireplumber")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map_err(|e| format!("wireplumber: {e}"))?;
+    if let Some(file) = wireplumber_pid_file() {
+        let _ = std::fs::write(file, format!("{}\n", child.id()));
+    }
+    Ok(())
 }
 
 fn node_id_by_name(name: &str) -> Option<u32> {

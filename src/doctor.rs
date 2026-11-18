@@ -60,6 +60,8 @@ pub enum Fix {
         node: u32,
     },
     RestartAudio,
+    /// Restart only WirePlumber so it probes the sound cards again.
+    Reprobe,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -307,6 +309,74 @@ fn superset_profile<'a>(
         .max_by_key(|p| p.priority)
 }
 
+/// A card the sound service probed before it was ready: the active profile
+/// has outputs but no inputs (or the reverse), the card offers the missing
+/// direction as a profile of its own, and no profile (other than Pro Audio)
+/// has both. A working card always offers the combination, so this pattern
+/// means the probe of one direction failed when WirePlumber started, for
+/// example while the speaker amplifiers were still loading firmware.
+pub fn split_card(device: &crate::pw::Device) -> Option<&'static str> {
+    if device.api != "alsa" {
+        return None;
+    }
+    let active = device.active_profile()?;
+    if active.name == "off" || active.name.starts_with("pro-audio") {
+        return None;
+    }
+    let usable = |p: &&crate::pw::Profile| {
+        p.name != "off" && !p.name.starts_with("pro-audio") && p.available != "no"
+    };
+    if device
+        .profiles
+        .iter()
+        .filter(usable)
+        .any(|p| p.sinks > 0 && p.sources > 0)
+    {
+        return None;
+    }
+    let offers_in = device.profiles.iter().filter(usable).any(|p| p.sources > 0);
+    let offers_out = device.profiles.iter().filter(usable).any(|p| p.sinks > 0);
+    if active.sinks > 0 && active.sources == 0 && offers_in {
+        Some("input")
+    } else if active.sources > 0 && active.sinks == 0 && offers_out {
+        Some("output")
+    } else {
+        None
+    }
+}
+
+/// One warning per card that lost a direction at start, with a re-probe fix.
+fn check_split_cards(out: &mut Vec<Finding>, model: &Model) {
+    for device in &model.devices {
+        let Some(missing) = split_card(device) else {
+            continue;
+        };
+        let what = if missing == "input" {
+            "microphone"
+        } else {
+            "speakers and headphones"
+        };
+        out.push(
+            finding(
+                Severity::Warning,
+                "cards",
+                format!("split-profile-{}", device.id),
+                format!("{}: the {what} is missing", device.description),
+                format!(
+                    "The card offers its output and its input only as separate profiles. \
+                     That happens when the sound service probed the card at start before \
+                     the hardware was ready. Probing it again brings the {what} back; \
+                     NIRUX does this by itself once after login (niruio heal)."
+                ),
+            )
+            .with_fix(
+                Fix::Reprobe,
+                format!("probe {} again (restarts WirePlumber)", device.description),
+            ),
+        );
+    }
+}
+
 /// One finding per card in a fallback profile. A fallback whose outputs and
 /// inputs all exist works (many laptops with speaker amplifiers only have
 /// that): information, not a warning, and no fix unless a strictly better
@@ -316,7 +386,7 @@ fn check_fallback_profiles(out: &mut Vec<Finding>, model: &Model) {
         let Some(profile) = device.active_profile() else {
             continue;
         };
-        if !profile.name.contains("fallback") {
+        if !profile.name.contains("fallback") || split_card(device).is_some() {
             continue;
         }
         let has = |kind: Kind| {
@@ -612,6 +682,7 @@ pub fn run(input: &Input) -> Vec<Finding> {
             }
         }
     }
+    check_split_cards(&mut out, model);
     check_fallback_profiles(&mut out, model);
     check_cameras(&mut out, input);
     if out.iter().all(|f| f.severity >= Severity::Info) {
@@ -741,6 +812,10 @@ pub fn apply(fix: &Fix, model: Option<&Model>, saved: &State) -> Result<String, 
         Fix::RestartAudio => {
             actions::restart_audio()?;
             Ok("sound services restarted".into())
+        }
+        Fix::Reprobe => {
+            actions::restart_wireplumber()?;
+            Ok("WirePlumber restarted, the cards are probed again".into())
         }
     }
 }
@@ -1003,6 +1078,38 @@ mod tests {
                 device: 50,
                 index: 5
             })
+        );
+    }
+
+    #[test]
+    fn split_card_at_start_is_a_warning_with_a_reprobe_fix() {
+        // niruxwork 2026-11-18: WirePlumber probed the card while the speaker
+        // amplifiers loaded firmware, so only output:stereo-fallback and
+        // input:analog-stereo existed and the microphone was gone.
+        let model = Graph::from_json(include_str!("../tests/fixtures/zbook-split.json"))
+            .unwrap()
+            .model();
+        let f = run_on(&model);
+        let split: Vec<&Finding> = f
+            .iter()
+            .filter(|f| f.id.starts_with("split-profile"))
+            .collect();
+        assert_eq!(split.len(), 1, "{f:#?}");
+        assert_eq!(split[0].severity, Severity::Warning);
+        assert_eq!(split[0].fix, Some(Fix::Reprobe));
+        assert!(split[0].title.contains("microphone"));
+        assert!(
+            !f.iter().any(|f| f.id.starts_with("fallback-profile")),
+            "no second finding for the same card"
+        );
+    }
+
+    #[test]
+    fn working_fallback_card_is_not_split() {
+        assert!(zbook().devices.iter().all(|d| split_card(d).is_none()));
+        assert!(
+            model().devices.iter().all(|d| split_card(d).is_none()),
+            "laptop fixture"
         );
     }
 }

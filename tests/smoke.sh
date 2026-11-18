@@ -64,4 +64,13 @@ grep -q '^niruio-reset Output/Audio:media.role:Movie$' "$TMP/commands" || fail "
 grep -q '^niruio-reset Output/Audio:media.role:Music$' "$TMP/commands" || fail "fix music"
 "$BIN" reset --silencing > /dev/null
 [ "$(grep -c '^niruio-reset' "$TMP/commands")" -ge 4 ] || fail "reset --silencing"
+# heal: nothing to do on a good card; restarts WirePlumber for a split card.
+: > "$TMP/commands"
+"$BIN" heal | grep -q 'nothing to heal' || fail "heal on a good card"
+[ ! -s "$TMP/commands" ] || fail "heal ran commands on a good card: $(cat "$TMP/commands")"
+NIRUIO_PW_DUMP="$HERE/fixtures/zbook-split.json" "$BIN" heal --login > "$TMP/heal.txt" 2>"$TMP/heal.err" || fail "heal split exit"
+grep -qE '^(systemctl --user restart wireplumber|wireplumber)$' "$TMP/commands" || fail "heal commands: $(cat "$TMP/commands")"
+grep -q 'probed too early' "$XDG_STATE_HOME/niruio/heal.log" || fail "heal log"
+NIRUIO_PW_DUMP="$HERE/fixtures/zbook-split.json" "$BIN" doctor --brief > "$TMP/split.txt" 2>&1 || true
+grep -qi 'microphone is missing' "$TMP/split.txt" || fail "doctor split: $(cat "$TMP/split.txt")"
 echo "smoke ok"
