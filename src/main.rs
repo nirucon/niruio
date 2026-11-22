@@ -93,8 +93,8 @@ fn main() -> ExitCode {
     }
 }
 
-/// Open NIRUIO in a kitty window of class `niruio`, which NIRUWM floats and
-/// centres. Falls back to x-terminal-emulator.
+/// Open NIRUIO in a terminal window of class `niruio`, which NIRUWM floats and
+/// centres: NIRUTERM, then kitty, then x-terminal-emulator.
 fn window(tab: Option<&str>) -> ExitCode {
     use std::process::Command;
     let me = std::env::current_exe()
@@ -109,7 +109,12 @@ fn window(tab: Option<&str>) -> ExitCode {
         argv.push("--tab".into());
         argv.push(tab.into());
     }
-    let result = if actions::have("kitty") {
+    let result = if actions::have("niruterm") {
+        Command::new("niruterm")
+            .args(["--class", "niruio", "--title", "NIRUIO", "-e"])
+            .args(&argv)
+            .spawn()
+    } else if actions::have("kitty") {
         Command::new("kitty")
             .args([
                 "--class",
